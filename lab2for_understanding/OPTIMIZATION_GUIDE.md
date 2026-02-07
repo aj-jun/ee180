@@ -1,16 +1,28 @@
-# EE180 Lab 2: Single-Threaded Optimization Guide
-## Complete Documentation of All Optimizations Applied
+# EE180 Lab 2: Optimization Guide
+## Complete Documentation of All Optimizations Applied (Part 1 & Part 2)
 
 ---
 
 ## Table of Contents
+
+### Part 1: Single-Threaded Optimizations
 1. [Overview](#overview)
 2. [Performance Targets](#performance-targets)
 3. [Optimization Phase 1: Compiler Flags](#optimization-phase-1-compiler-flags)
 4. [Optimization Phase 2: grayScale() Function](#optimization-phase-2-grayscale-function)
 5. [Optimization Phase 3: sobelCalc() Function](#optimization-phase-3-sobelcalc-function)
-6. [Performance Analysis](#performance-analysis)
-7. [Key Takeaways](#key-takeaways)
+6. [Part 1 Performance Analysis](#part-1-performance-analysis)
+
+### Part 2: Multi-Threaded Optimizations
+7. [Part 2 Overview](#part-2-overview)
+8. [Threading Architecture](#threading-architecture)
+9. [Synchronization Design](#synchronization-design)
+10. [Work Splitting Strategy](#work-splitting-strategy)
+11. [Files Modified for Part 2](#files-modified-for-part-2)
+12. [Part 2 Performance Analysis](#part-2-performance-analysis)
+
+### Summary
+13. [Key Takeaways](#key-takeaways)
 
 ---
 
@@ -601,9 +613,9 @@ VST1.8   {d0}, [sobel]!              ; Store 4 results
 
 ---
 
-## Performance Analysis
+## Part 1 Performance Analysis
 
-### Expected Final Performance:
+### Expected Final Performance (Single-Threaded):
 
 | Component | Baseline Cycles | Optimized Cycles | Speedup |
 |-----------|----------------|------------------|---------|
@@ -648,55 +660,424 @@ Reduction: 5.9×
 
 ---
 
+---
+---
+
+# PART 2: Multi-Threaded Optimizations
+
+---
+
+## Part 2 Overview
+
+Part 2 builds on the single-threaded optimizations from Part 1 by using **two threads** to process the image in parallel on the dual-core ARM Cortex-A9. The goal is to achieve up to **2x additional speedup** on top of Part 1 performance.
+
+**Target:** ~87 FPS (from ~67 FPS single-threaded)
+**Approach:** Split grayscale + sobel computation across two threads, each processing half the image rows.
+**Key constraint:** Only 2 threads allowed. Threads are launched once and reused for all frames.
+
+### What Changes from Part 1 to Part 2:
+
+| Aspect | Part 1 (Single-Threaded) | Part 2 (Multi-Threaded) |
+|--------|--------------------------|-------------------------|
+| **Threads** | 1 thread does everything | 2 threads split computation |
+| **Entry point** | `runSobelST()` | `runSobelMT()` (called by 2 threads) |
+| **Grayscale** | Full image, single call | Each thread processes half the rows |
+| **Sobel** | Full image, single call | Each thread processes half the rows |
+| **Capture/Display** | Single thread | Thread 0 only (serial) |
+| **Synchronization** | None needed | 4 barriers per frame |
+| **Run command** | `./sobel -n 70` | `./sobel -m -n 70` |
+
+---
+
+## Threading Architecture
+
+### Thread Roles
+
+```
+main() creates 2 threads → both call runSobelMT()
+
+Thread 0 (Controller):                Thread 1 (Worker):
+  - Captures frame                      - Waits at barr_capture
+  - Grayscale (top half)                - Grayscale (bottom half)
+  - Sobel (top half)                    - Sobel (bottom half)
+  - Displays result                     - Waits at barr_display
+  - Checks exit condition               - Checks mt_done flag
+  - Writes performance stats            - (no cleanup needed)
+```
+
+### Thread Identification
+
+Both threads run the same function `runSobelMT()`. A mutex determines which thread arrives first and becomes the "controller" (Thread 0):
+
+```cpp
+pthread_mutex_lock(&thread0);
+if (thread0_id == 0) {
+    thread0_id = myID;    // First thread becomes controller
+}
+pthread_mutex_unlock(&thread0);
+
+bool isThread0 = (myID == thread0_id);
+```
+
+**Why a mutex?** Without it, both threads could simultaneously check `thread0_id == 0`, both set their ID, and the last write wins. The mutex ensures **exactly one** thread becomes the controller.
+
+---
+
+## Synchronization Design
+
+### The 4-Barrier Pipeline
+
+Each frame uses 4 barriers to synchronize the two threads. A `pthread_barrier_wait` blocks the calling thread until **all threads** (2 in our case) have reached the same barrier.
+
+```
+Frame N Timeline:
+
+Thread 0:  [CAPTURE] ──barr_capture──▶ [GRAY top] ──barr_gray──▶ [SOBEL top] ──barr_sobel──▶ [DISPLAY] ──barr_display──▶
+Thread 1:  (waiting)  ──barr_capture──▶ [GRAY bot] ──barr_gray──▶ [SOBEL bot] ──barr_sobel──▶ (waiting)  ──barr_display──▶
+                                        ◄─parallel─►              ◄─parallel─►
+```
+
+### Barrier Purposes:
+
+| Barrier | Purpose | Why It's Needed |
+|---------|---------|-----------------|
+| `barr_capture` | Frame data ready | Thread 1 can't start grayscale until `src` frame is captured by Thread 0 |
+| `barr_gray` | Grayscale complete | Sobel's 3x3 kernel reads across the row boundary between halves — **all gray data must be ready** |
+| `barr_sobel` | Sobel complete | Thread 0 can't display until both halves of the sobel output are computed |
+| `barr_display` | Iteration sync | Both threads must check `mt_done` flag together before looping |
+
+### Why `barr_gray` is Critical:
+
+The Sobel filter uses a 3x3 kernel. At the boundary between Thread 0's and Thread 1's regions (row 240), the kernel reads from **both halves**:
+
+```
+Thread 0 processes rows [1, 240) for Sobel:
+  - Row 239 Sobel kernel reads gray rows 238, 239, 240
+  - Row 240 is in Thread 1's grayscale region!
+
+Thread 1 processes rows [240, 479) for Sobel:
+  - Row 240 Sobel kernel reads gray rows 239, 240, 241
+  - Row 239 is in Thread 0's grayscale region!
+```
+
+Without `barr_gray`, Thread 0 could start Sobel on row 239 before Thread 1 has finished computing gray row 240 → **race condition, wrong pixel values!**
+
+### Exit Synchronization
+
+```cpp
+// Thread 0 sets the flag after display:
+if (c == 'q' || i >= opts.numFrames) {
+    mt_done = 1;   // volatile flag visible to both threads
+}
+
+// BARRIER 4: Both threads synchronize
+pthread_barrier_wait(&barr_display);
+
+// Both threads check the flag and break together
+if (mt_done) break;
+```
+
+**Why this works:** Thread 0 sets `mt_done = 1` **before** reaching `barr_display`. Thread 1 is already waiting at `barr_display`. Once both pass the barrier, both see `mt_done == 1` and break out of the loop.
+
+---
+
+## Work Splitting Strategy
+
+### Image Division
+
+The 480-row image is split horizontally in half:
+
+```
+Row 0   ┌─────────────────────────┐
+        │                         │
+        │    Thread 0 Region      │  Gray: rows [0, 240)
+        │    (top half)           │  Sobel: rows [1, 240)
+        │                         │
+Row 239 ├ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤  ← boundary (Sobel kernel overlaps here)
+Row 240 │                         │
+        │    Thread 1 Region      │  Gray: rows [240, 480)
+        │    (bottom half)        │  Sobel: rows [240, 479)
+        │                         │
+Row 479 └─────────────────────────┘
+```
+
+### Row Ranges:
+
+| Function | Thread 0 | Thread 1 | Total Rows |
+|----------|----------|----------|------------|
+| **Grayscale** | [0, 240) → 240 rows | [240, 480) → 240 rows | 480 (all) |
+| **Sobel** | [1, 240) → 239 rows | [240, 479) → 239 rows | 478 (skip borders) |
+
+### Row-Range Function Overloads
+
+New overloaded versions of `grayScale()` and `sobelCalc()` accept row ranges:
+
+```cpp
+// Original (Part 1, still used by single-threaded version):
+void grayScale(Mat& img, Mat& img_gray_out);          // processes all rows
+void sobelCalc(Mat& img_gray, Mat& img_sobel_out);     // processes all rows
+
+// New overloads (Part 2, used by multi-threaded version):
+void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow);
+void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow);
+```
+
+The row-range versions use the **exact same optimized computation** from Part 1 (integer arithmetic, pointer access, bit shifts, single-pass Sobel), just applied to a subset of rows:
+
+```cpp
+void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
+{
+  unsigned char *img_data = img.data;
+  unsigned char *gray_data = img_gray_out.data;
+
+  int startPx = startRow * IMG_WIDTH;    // Convert row range to pixel range
+  int endPx = endRow * IMG_WIDTH;
+
+  for (int i = startPx; i < endPx; i++) {
+    int idx = i * 3;
+    unsigned char blue = img_data[idx];
+    unsigned char green = img_data[idx + 1];
+    unsigned char red = img_data[idx + 2];
+    gray_data[i] = (7*blue + 38*green + 19*red) >> 6;
+  }
+}
+```
+
+---
+
+## Files Modified for Part 2
+
+### 1. `sobel_alg.h` — Added declarations
+
+```cpp
+// Multi-threading synchronization barriers
+extern pthread_barrier_t barr_capture, barr_gray, barr_sobel, barr_display;
+
+// Row-range overloads for multi-threaded processing
+void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow);
+void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow);
+```
+
+### 2. `main.cpp` — Barrier initialization and destruction
+
+```cpp
+// Define barriers
+pthread_barrier_t barr_capture, barr_gray, barr_sobel, barr_display;
+
+// In mainMultiThread():
+pthread_barrier_init(&barr_capture, NULL, 2);  // 2 = number of threads
+pthread_barrier_init(&barr_gray, NULL, 2);
+pthread_barrier_init(&barr_sobel, NULL, 2);
+pthread_barrier_init(&barr_display, NULL, 2);
+
+// Cleanup:
+pthread_barrier_destroy(&barr_capture);
+pthread_barrier_destroy(&barr_gray);
+pthread_barrier_destroy(&barr_sobel);
+pthread_barrier_destroy(&barr_display);
+```
+
+### 3. `sobel_calc.cpp` — Row-range function overloads
+
+Added `grayScale(img, gray, startRow, endRow)` and `sobelCalc(gray, sobel, startRow, endRow)` — same optimized math as Part 1, applied to a subset of rows.
+
+### 4. `sobel_mt.cpp` — Complete rewrite
+
+**Before (skeleton):** Thread 1 was immediately killed; Thread 0 did all work alone.
+
+**After:** Both threads participate in every frame:
+- Thread 0: capture → barrier → gray(top) → barrier → sobel(top) → barrier → display → barrier
+- Thread 1: barrier → gray(bottom) → barrier → sobel(bottom) → barrier → barrier
+
+### Additional optimization in `sobel_mt.cpp`:
+
+```cpp
+// Allocate shared image buffers ONCE before the loop (not every frame)
+img_gray = Mat(IMG_HEIGHT, IMG_WIDTH, CV_8UC1);
+img_sobel = Mat(IMG_HEIGHT, IMG_WIDTH, CV_8UC1);
+```
+
+This eliminates per-frame `Mat` allocation overhead (~1000 cycles × 2 allocations × N frames).
+
+---
+
+## Part 2 Performance Analysis
+
+### Theoretical Speedup from Multi-Threading
+
+**Amdahl's Law:**
+```
+Speedup = 1 / (S + P/N)
+
+Where:
+  S = serial fraction (capture + display)
+  P = parallel fraction (grayscale + sobel)
+  N = number of cores = 2
+```
+
+From Part 1 performance breakdown:
+```
+Capture:   ~4.6M cycles  (serial)     → ~26% of optimized total
+Grayscale: ~3M cycles    (parallel)   → ~17%
+Sobel:     ~8M cycles    (parallel)   → ~45%
+Display:   ~2.2M cycles  (serial)     → ~12%
+Total:     ~17.8M cycles
+
+S = (4.6 + 2.2) / 17.8 = 0.38  (38% serial)
+P = (3.0 + 8.0) / 17.8 = 0.62  (62% parallel)
+```
+
+**Theoretical speedup:**
+```
+Speedup = 1 / (0.38 + 0.62/2) = 1 / (0.38 + 0.31) = 1 / 0.69 = 1.45×
+```
+
+### Expected Performance:
+
+| Metric | Part 1 (ST) | Part 2 (MT) | Improvement |
+|--------|-------------|-------------|-------------|
+| **Grayscale time** | ~3M cycles | ~1.5M cycles | 2x (split across 2 cores) |
+| **Sobel time** | ~8M cycles | ~4M cycles | 2x (split across 2 cores) |
+| **Capture time** | ~4.6M cycles | ~4.6M cycles | 1x (serial, thread 0 only) |
+| **Display time** | ~2.2M cycles | ~2.2M cycles | 1x (serial, thread 0 only) |
+| **Total cycles/frame** | ~17.8M | ~12.3M | 1.45x |
+| **FPS** | ~67 | ~87 | 1.3x |
+
+### Why Not 2x Speedup?
+
+1. **Serial bottleneck (Amdahl's Law):** Capture and display cannot be parallelized — they must run on Thread 0 alone. This limits the maximum theoretical speedup.
+
+2. **Barrier overhead:** Each barrier adds ~100-500 cycles of synchronization cost per frame. With 4 barriers × ~300 cycles = ~1200 cycles overhead per frame.
+
+3. **Cache interference:** Both cores share the L2 cache. When two threads access different halves of the image, they may evict each other's cache lines, increasing L2 misses.
+
+4. **Memory bandwidth:** Both cores compete for the same memory bus. For memory-bound operations like image processing, bandwidth saturation limits parallelism.
+
+### FPS Calculation:
+```
+CPU Frequency: 800 MHz = 800M cycles/second
+
+Part 1 FPS = 800M / 17.8M ≈ 67 FPS
+Part 2 FPS = 800M / 12.3M ≈ 87 FPS  ← Meets target!
+```
+
+### Energy Considerations:
+```
+Part 1: NCORES = 1, Energy = PROC_EPC * 1 / FPS
+Part 2: NCORES = 2, Energy = PROC_EPC * 2 / FPS
+
+Higher FPS but 2x power draw → energy per frame may increase slightly.
+This is the classic power-performance tradeoff in multi-core systems.
+```
+
+---
+
 ## Key Takeaways
 
-### 1. Compiler Optimizations Matter
-- `-O3 -ftree-vectorize -mfpu=neon` provides 4-6× speedup
+### Part 1 Takeaways (Single-Threaded)
+
+#### 1. Compiler Optimizations Matter
+- `-O3 -ftree-vectorize -mfpu=neon` provides 4-6x speedup
 - Modern compilers are smart but need help (simple loop structures)
 - Architecture-specific flags (`-march`, `-mtune`) provide extra boost
 
-### 2. Choose the Right Data Types
-- Floating-point → Integer: ~10× faster for byte operations
+#### 2. Choose the Right Data Types
+- Floating-point to Integer: ~10x faster for byte operations
 - Fixed-point arithmetic with bit shifts: Fast and accurate enough
 
-### 3. Memory Access Patterns Are Critical
+#### 3. Memory Access Patterns Are Critical
 - Sequential access >> random access (cache-friendly)
 - Minimize memory passes (loop fusion)
 - Eliminate unnecessary allocations
 
-### 4. Exploit SIMD/Vector Instructions
+#### 4. Exploit SIMD/Vector Instructions
 - ARM NEON can process 4-16 elements in parallel
 - Requires: simple loops, no dependencies, regular access patterns
 - Automatic vectorization is powerful when enabled
 
-### 5. Reduce Redundancy
+#### 5. Reduce Redundancy
 - Pre-calculate indices
 - Load data once, use multiple times
 - Eliminate intermediate buffers
 
-### 6. Profile-Guided Optimization
-- Sobel was 70% of runtime → highest optimization priority
-- Small optimizations on critical path = big impact
-- Less critical code (capture, display) left unchanged
+### Part 2 Takeaways (Multi-Threaded)
 
-### 7. Cache Hierarchy Awareness
+#### 6. Amdahl's Law Limits Parallel Speedup
+- Serial portions (capture, display) cap the maximum speedup
+- With 38% serial code: max theoretical speedup is 1.63x, not 2x
+- Optimize serial sections first to maximize parallel gains
+
+#### 7. Barriers Are Essential at Data Dependencies
+- The 3x3 Sobel kernel creates a data dependency at the row boundary
+- `barr_gray` ensures all grayscale data is ready before Sobel begins
+- Missing this barrier = race condition = wrong pixel values (Heisenbug!)
+
+#### 8. Thread Reuse > Thread Creation
+- Launch threads once, reuse for all frames (as required by the lab)
+- `pthread_create` overhead: ~10,000-50,000 cycles per call
+- Reusing threads: ~100-500 cycles per barrier sync
+
+#### 9. Simple Synchronization Is Best
+- 4 barriers create a clear pipeline with no ambiguity
+- No complex lock-free algorithms needed for this workload
+- Deterministic execution: same result every time
+
+#### 10. Profile Before Parallelizing
+- Only parallelize the computation (grayscale + sobel, 62% of runtime)
+- Capture and display are inherently serial (I/O bound)
+- Focus effort where it matters most
+
+### Combined Takeaways
+
+#### 11. Cache Hierarchy Awareness
 - L1 cache: 32KB, ~4 cycles latency
-- L2 cache: 512KB, ~20 cycles latency
+- L2 cache: 512KB, ~20 cycles latency (shared between cores in MT)
 - DRAM: GB, ~200 cycles latency
 - Keep working set in L1 cache whenever possible
+
+#### 12. The Optimization Stack
+```
+Layer 1: Compiler flags         → 4-6x  (easiest, biggest win)
+Layer 2: Algorithm optimization → 2-3x  (integer math, loop fusion)
+Layer 3: SIMD vectorization     → 2-4x  (NEON auto-vectorization)
+Layer 4: Multi-threading        → 1.3x  (limited by Amdahl's Law)
+                                  ─────
+Combined:                         ~15x  (5.67 FPS → 87 FPS)
+```
 
 ---
 
 ## Summary Table
 
+### Part 1: Single-Threaded Optimizations
+
 | Optimization Category | Techniques Used | Speedup | Cumulative Speedup |
 |----------------------|-----------------|---------|-------------------|
-| **Compiler Flags** | -O3, -ftree-vectorize, -mfpu=neon | 4-6× | 4-6× |
-| **grayScale()** | Integer arithmetic, pointer arithmetic, loop flattening | 13× | 1.8-2.2× |
-| **sobelCalc()** | Loop fusion, eliminate cloning, index optimization | 13× | 8-12× |
-| **COMBINED TOTAL** | | | **~12-15×** |
+| **Compiler Flags** | -O3, -ftree-vectorize, -mfpu=neon | 4-6x | 4-6x |
+| **grayScale()** | Integer arithmetic, pointer arithmetic, loop flattening | 13x | 1.8-2.2x |
+| **sobelCalc()** | Loop fusion, eliminate cloning, index optimization | 13x | 8-12x |
+| **Part 1 Total** | | | **~12x** |
 
-**Final Result:** 5.67 FPS → **67+ FPS** ✓
+**Part 1 Result:** 5.67 FPS → **~67 FPS**
+
+### Part 2: Multi-Threaded Optimizations
+
+| Optimization Category | Techniques Used | Speedup | Cumulative Speedup |
+|----------------------|-----------------|---------|-------------------|
+| **Work splitting** | Each thread processes half the image rows | ~2x on parallel sections | 1.3x overall |
+| **Barrier sync** | 4 barriers per frame (capture, gray, sobel, display) | Minimal overhead | - |
+| **Buffer reuse** | Allocate img_gray/img_sobel once, not per frame | Eliminates alloc overhead | - |
+| **Part 2 Total** | | | **~1.3x on top of Part 1** |
+
+**Part 2 Result:** ~67 FPS → **~87 FPS**
+
+### Combined Result
+
+| | Baseline | Part 1 (ST) | Part 2 (MT) |
+|---|---------|-------------|-------------|
+| **FPS** | 5.67 | ~67 | ~87 |
+| **Cycles/frame** | 152M | ~17.8M | ~12.3M |
+| **Total speedup** | 1x | ~12x | **~15x** |
 
 ---
 
@@ -717,6 +1098,7 @@ Reduction: 5.9×
 
 ---
 
-**Document Created:** EE180 Lab 2 Single-Threaded Optimizations
-**Target Performance:** 67 FPS (12× speedup)
-**Status:** All optimizations implemented and documented ✓
+**Document Created:** EE180 Lab 2 Optimizations (Part 1 + Part 2)
+**Part 1 Target:** 67 FPS (12x speedup) -- Single-threaded
+**Part 2 Target:** 87 FPS (15x speedup) -- Multi-threaded
+**Status:** All optimizations implemented and documented

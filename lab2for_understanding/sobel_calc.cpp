@@ -59,6 +59,74 @@ void grayScale(Mat& img, Mat& img_gray_out)
  * 6. Removed intermediate buffers
  * 7. Loop unrolling friendly structure
  ********************************************/
+/*******************************************
+ * Model: grayScale (row-range) - MULTI-THREADED VERSION
+ * Input: Mat img, start/end rows
+ * Output: None directly. Modifies a ref parameter img_gray_out
+ * Desc: Converts a row range to grayscale (for parallel processing)
+ *
+ * PART 2: Each thread calls this with its assigned row range
+ *   Thread 0: rows [0, IMG_HEIGHT/2)
+ *   Thread 1: rows [IMG_HEIGHT/2, IMG_HEIGHT)
+ ********************************************/
+void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
+{
+  unsigned char *img_data = img.data;
+  unsigned char *gray_data = img_gray_out.data;
+
+  int startPx = startRow * IMG_WIDTH;
+  int endPx = endRow * IMG_WIDTH;
+
+  for (int i = startPx; i < endPx; i++) {
+    int idx = i * 3;
+    unsigned char blue = img_data[idx];
+    unsigned char green = img_data[idx + 1];
+    unsigned char red = img_data[idx + 2];
+    gray_data[i] = (7*blue + 38*green + 19*red) >> 6;
+  }
+}
+
+/*******************************************
+ * Model: sobelCalc (row-range) - MULTI-THREADED VERSION
+ * Input: Mat img_gray, start/end rows
+ * Output: None directly. Modifies a ref parameter img_sobel_out
+ * Desc: Performs sobel on a row range (for parallel processing)
+ *
+ * PART 2: Each thread calls this with its assigned row range
+ *   Thread 0: rows [1, IMG_HEIGHT/2)
+ *   Thread 1: rows [IMG_HEIGHT/2, IMG_HEIGHT-1)
+ * Note: Grayscale barrier must complete before calling this,
+ *       since the 3x3 kernel reads across the thread boundary.
+ ********************************************/
+void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow)
+{
+  unsigned char *gray = img_gray.data;
+  unsigned char *sobel = img_sobel_out.data;
+
+  for (int i = startRow; i < endRow; i++) {
+    for (int j = 1; j < IMG_WIDTH - 1; j++) {
+      int idx_top = IMG_WIDTH * (i-1) + j;
+      int idx_mid = IMG_WIDTH * i + j;
+      int idx_bot = IMG_WIDTH * (i+1) + j;
+
+      int p00 = gray[idx_top - 1];
+      int p01 = gray[idx_top];
+      int p02 = gray[idx_top + 1];
+      int p10 = gray[idx_mid - 1];
+      int p12 = gray[idx_mid + 1];
+      int p20 = gray[idx_bot - 1];
+      int p21 = gray[idx_bot];
+      int p22 = gray[idx_bot + 1];
+
+      int gx = (p02 + (p12 << 1) + p22) - (p00 + (p10 << 1) + p20);
+      int gy = (p20 + (p21 << 1) + p22) - (p00 + (p01 << 1) + p02);
+
+      int mag = abs(gx) + abs(gy);
+      sobel[idx_mid] = (mag > 255) ? 255 : mag;
+    }
+  }
+}
+
 void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 {
   // Use pointers for direct memory access

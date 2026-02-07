@@ -28,6 +28,9 @@ extern pthread_barrier_t endSobel;
 extern pthread_mutex_t thread0;
 extern pthread_t thread0_id;
 
+// Multi-threading synchronization barriers (Part 2)
+extern pthread_barrier_t barr_capture, barr_gray, barr_sobel, barr_display;
+
 
 // Commandline options
 struct opts {
@@ -41,6 +44,10 @@ extern struct opts opts;
 
 void sobelCalc(Mat& img_gray, Mat& img_sobel_out);
 void grayScale(Mat& img, Mat& img_gray_out);
+
+// Row-range overloads for multi-threaded processing (Part 2)
+void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow);
+void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow);
 
 void runSobelST();
 void *runSobelMT(void *ptr);

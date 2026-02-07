@@ -87,6 +87,9 @@ int mainSingleThread()
 pthread_barrier_t endSobel;
 pthread_mutex_t thread0 = PTHREAD_MUTEX_INITIALIZER;
 pthread_t thread0_id = 0;
+
+// Multi-threading synchronization barriers (Part 2)
+pthread_barrier_t barr_capture, barr_gray, barr_sobel, barr_display;
 int mainMultiThread()
 {
   // Thread variables
@@ -94,6 +97,12 @@ int mainMultiThread()
 
   // Set up a barrier to synchronize both threads at the end of runSobel
   pthread_barrier_init(&endSobel, NULL, 2);
+
+  // Initialize barriers for multi-threaded frame processing (Part 2)
+  pthread_barrier_init(&barr_capture, NULL, 2);
+  pthread_barrier_init(&barr_gray, NULL, 2);
+  pthread_barrier_init(&barr_sobel, NULL, 2);
+  pthread_barrier_init(&barr_display, NULL, 2);
 
   // Call threads
   int ret;
@@ -112,6 +121,10 @@ int mainMultiThread()
 
   // Destroy the barriers
   pthread_barrier_destroy(&endSobel);
+  pthread_barrier_destroy(&barr_capture);
+  pthread_barrier_destroy(&barr_gray);
+  pthread_barrier_destroy(&barr_sobel);
+  pthread_barrier_destroy(&barr_display);
 
   // Return ok if sobel returns correctly
   return 0;
