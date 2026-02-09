@@ -74,7 +74,7 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 
       // combine the magnitutudes and check that it is < 255
       int magnitude = abs(gx) + abs(gy);
-      img_sobel_out.data[idx_mid] = (mag > 255) ? 255 : magnitude;
+      img_sobel_out.data[idx_mid] = (magnitude > 255) ? 255 : magnitude;
     }
   }
 }
