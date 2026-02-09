@@ -50,50 +50,78 @@ void grayScale(Mat& img, Mat& img_gray_out)
  ********************************************/
 void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 {
-  Mat img_outx = img_gray.clone();
-  Mat img_outy = img_gray.clone();
+  
+  // ✅ OPTIMIZATION 1: Use pointers, eliminate Mat cloning
+  unsigned char *gray = img_gray.data;
+  unsigned char *sobel = img_sobel_out.data;
 
-  // Apply Sobel filter to black & white image
-  unsigned short sobel;
+  // ✅ OPTIMIZATION 2: Single pass - compute Gx and Gy together
+  for (int i = 1; i < IMG_HEIGHT - 1; i++) {
+    for (int j = 1; j < IMG_WIDTH - 1; j++) {
+      // ✅ OPTIMIZATION 3: Pre-calculate indices once
+      int idx_top = IMG_WIDTH * (i-1) + j;
+      int idx_mid = IMG_WIDTH * i + j;
+      int idx_bot = IMG_WIDTH * (i+1) + j;
 
-  // Calculate the x convolution
-  for (int i=1; i<img_gray.rows; i++) {
-    for (int j=1; j<img_gray.cols; j++) {
-      sobel = abs(img_gray.data[IMG_WIDTH*(i-1) + (j-1)] -
-		  img_gray.data[IMG_WIDTH*(i+1) + (j-1)] +
-		  2*img_gray.data[IMG_WIDTH*(i-1) + (j)] -
-		  2*img_gray.data[IMG_WIDTH*(i+1) + (j)] +
-		  img_gray.data[IMG_WIDTH*(i-1) + (j+1)] -
-		  img_gray.data[IMG_WIDTH*(i+1) + (j+1)]);
+      // ✅ OPTIMIZATION 4: Load 3x3 neighborhood once
+      int p00 = gray[idx_top - 1];
+      int p01 = gray[idx_top];
+      int p02 = gray[idx_top + 1];
+      int p10 = gray[idx_mid - 1];
+      int p12 = gray[idx_mid + 1];
+      int p20 = gray[idx_bot - 1];
+      int p21 = gray[idx_bot];
+      int p22 = gray[idx_bot + 1];
 
-      sobel = (sobel > 255) ? 255 : sobel;
-      img_outx.data[IMG_WIDTH*(i) + (j)] = sobel;
+      // ✅ OPTIMIZATION 5: Compute Gx and Gy in same iteration
+      int gx = (p02 + (p12 << 1) + p22) - (p00 + (p10 << 1) + p20);
+      int gy = (p20 + (p21 << 1) + p22) - (p00 + (p01 << 1) + p02);
+
+      // ✅ OPTIMIZATION 6: Combined magnitude + clamp
+      int mag = abs(gx) + abs(gy);
+      sobel[idx_mid] = (mag > 255) ? 255 : mag;
     }
   }
+}
 
-  // Calc the y convolution
-  for (int i=1; i<img_gray.rows; i++) {
-    for (int j=1; j<img_gray.cols; j++) {
-     sobel = abs(img_gray.data[IMG_WIDTH*(i-1) + (j-1)] -
-		   img_gray.data[IMG_WIDTH*(i-1) + (j+1)] +
-		   2*img_gray.data[IMG_WIDTH*(i) + (j-1)] -
-		   2*img_gray.data[IMG_WIDTH*(i) + (j+1)] +
-		   img_gray.data[IMG_WIDTH*(i+1) + (j-1)] -
-		   img_gray.data[IMG_WIDTH*(i+1) + (j+1)]);
+  // // Calculate the x convolution
+  // for (int i=1; i<img_gray.rows; i++) {
+  //   for (int j=1; j<img_gray.cols; j++) {
+  //     sobel = abs(img_gray.data[IMG_WIDTH*(i-1) + (j-1)] -
+	// 	  img_gray.data[IMG_WIDTH*(i+1) + (j-1)] +
+	// 	  2*img_gray.data[IMG_WIDTH*(i-1) + (j)] -
+	// 	  2*img_gray.data[IMG_WIDTH*(i+1) + (j)] +
+	// 	  img_gray.data[IMG_WIDTH*(i-1) + (j+1)] -
+	// 	  img_gray.data[IMG_WIDTH*(i+1) + (j+1)]);
 
-     sobel = (sobel > 255) ? 255 : sobel;
+  //     sobel = (sobel > 255) ? 255 : sobel;
+  //     img_outx.data[IMG_WIDTH*(i) + (j)] = sobel;
+  //   }
+  // }
 
-     img_outy.data[IMG_WIDTH*(i) + j] = sobel;
-    }
-  }
+  // // Calc the y convolution
+  // for (int i=1; i<img_gray.rows; i++) {
+  //   for (int j=1; j<img_gray.cols; j++) {
+  //    sobel = abs(img_gray.data[IMG_WIDTH*(i-1) + (j-1)] -
+	// 	   img_gray.data[IMG_WIDTH*(i-1) + (j+1)] +
+	// 	   2*img_gray.data[IMG_WIDTH*(i) + (j-1)] -
+	// 	   2*img_gray.data[IMG_WIDTH*(i) + (j+1)] +
+	// 	   img_gray.data[IMG_WIDTH*(i+1) + (j-1)] -
+	// 	   img_gray.data[IMG_WIDTH*(i+1) + (j+1)]);
 
-  // Combine the two convolutions into the output image
-  for (int i=1; i<img_gray.rows; i++) {
-    for (int j=1; j<img_gray.cols; j++) {
-      sobel = img_outx.data[IMG_WIDTH*(i) + j] +
-	img_outy.data[IMG_WIDTH*(i) + j];
-      sobel = (sobel > 255) ? 255 : sobel;
-      img_sobel_out.data[IMG_WIDTH*(i) + j] = sobel;
-    }
-  }
+  //    sobel = (sobel > 255) ? 255 : sobel;
+
+  //    img_outy.data[IMG_WIDTH*(i) + j] = sobel;
+  //   }
+  // }
+
+  // // Combine the two convolutions into the output image
+  // for (int i=1; i<img_gray.rows; i++) {
+  //   for (int j=1; j<img_gray.cols; j++) {
+  //     sobel = img_outx.data[IMG_WIDTH*(i) + j] +
+	// img_outy.data[IMG_WIDTH*(i) + j];
+  //     sobel = (sobel > 255) ? 255 : sobel;
+  //     img_sobel_out.data[IMG_WIDTH*(i) + j] = sobel;
+  //   }
+  // }
 }
