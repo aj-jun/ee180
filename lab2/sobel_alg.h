@@ -25,6 +25,7 @@ using namespace std;
 
 //This mutex will be used to allow threads to contest for thread 0 status
 extern pthread_barrier_t endSobel;
+extern pthread_barrier_t barr_capture, barr_gray, barr_sobel, barr_display;
 extern pthread_mutex_t thread0;
 extern pthread_t thread0_id;
 
