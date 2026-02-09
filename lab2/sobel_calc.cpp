@@ -50,15 +50,12 @@ void grayScale(Mat& img, Mat& img_gray_out)
  ********************************************/
 void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 {
-  
-  // ✅ OPTIMIZATION 1: Use pointers, eliminate Mat cloning
-  unsigned char *gray = img_gray.data;
+    unsigned char *gray = img_gray.data;
   unsigned char *sobel = img_sobel_out.data;
 
-  // ✅ OPTIMIZATION 2: Single pass - compute Gx and Gy together
+  // Gy and Gx together
   for (int i = 1; i < IMG_HEIGHT - 1; i++) {
     for (int j = 1; j < IMG_WIDTH - 1; j++) {
-      // ✅ OPTIMIZATION 3: Pre-calculate indices once
       int idx_top = IMG_WIDTH * (i-1) + j;
       int idx_mid = IMG_WIDTH * i + j;
       int idx_bot = IMG_WIDTH * (i+1) + j;
