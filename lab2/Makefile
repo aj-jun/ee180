@@ -1,7 +1,6 @@
 # Set compiler args
 CC=g++
-CFLAGS=-Wall -c -03 -ftree-vectorize -mfpu=neon -march=armv7-a -mtune=cortex-a9
-
+CFLAGS=-Wall -c -O3 -ftree-vectorize -mfpu=neon -march=armv7-a -mtune=cortex-a9
 LDFLAGS=
 LDLIBS=-L /usr/lib $$(pkg-config --cflags --libs opencv) -pthread
 ifeq ($(shell arch), armv7l)
@@ -14,7 +13,7 @@ TAR=lab2.tar.gz
 SUBMIT_FILES=lab2/*.cpp lab2/*.h lab2/README lab2/Makefile
 
 all: $(SOURCES) $(EXECUTABLE)
-git
+
 $(EXECUTABLE):$(OBJECTS)
 	$(CC) -o $@ $(LDFLAGS) $(OBJECTS) $(LDLIBS)
 
