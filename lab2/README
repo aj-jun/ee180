@@ -14,6 +14,7 @@ Vincent:
 
 
 - A brief description of optimizations you tried, the outcome, and some explanation (why it worked / why it did not)
+All of the optimizations that we used were applied to the single thread implementation since the multi-thread implementation called upon the single thread optimization. I was honestly really confused when starting this lab even after watching the review session and clicking through the links with the descriptive information from the lab handout. I started with the compiler flags based on what was described on the linked websites for ARM and from my initial description from chatgpt, I couldn't tell if the flags made that much of a difference. I was going off of what I read would be helpful since nothing was implemented in sobel_calc.cpp. Next, I started on reconstructing the code for grayScale then sobelCalc. I found that the double layered loop for grayscale was not needed and could instead be turning into a one layer loop that segmented/included the BGR values. This changed the Framers per Second from 3 to 5 which was very little. I thought I did something wrong at first, so I asked chatgpt by this didn't make that much of an impact. It explained to me that most of the implementation would be done in sobelCalc so that while it was helpful to change grayScale it didn't make sense for it to have a large impact. Then I reconstructed sobelCalc which collapsed the three separate loop iterations into calculating the gx and gy convolutions together. It was also a great way to add the magnitudes to decide if the value was > or < 255. When reconstructing the two function calls, the instructions per frame went up to 38 but it wasn't the expected 67, so I turned to using neon instrinstics. This involved 
 
 - Report the final performance for both single thread and multithread (we will verify this with your code submission)
 Single Thread: 
@@ -59,4 +60,5 @@ Instruction count per frame, 7.09349e+06
 
 - If you used AI tools, explain how you use it to help with the assignment
 Ashley: 
+Overall, I was confused by what the three different methods of optimization meant based on what was provided in the review slide deck. I copied and pasted the three methods of optimization and had chatgpt explain what each meant in a different way and how they were different from one another. 
 I used AI to help provide defintions when explaining the different compiler flags. This was particularly helpful when understadnignt aht we can specify which architecture and processor to optimize for in the flags. 

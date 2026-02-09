@@ -14,7 +14,7 @@ void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
   unsigned char *img_data = img.data;
   unsigned char *gray_data = img_gray_out.data;
 
-  // If both 0, process the whole image
+  // if both are 0 then this is single thread
   if (startRow == 0 && endRow == 0) {
     endRow = IMG_HEIGHT;
   }
@@ -22,33 +22,32 @@ void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
   int startPx = startRow * IMG_WIDTH;
   int endPx = endRow * IMG_WIDTH;
 
-  // Process 8 pixels at a time using NEON
+  // Process 4 pixels at a time using neon float intrinsics
   int i = startPx;
-  for (; i <= endPx - 8; i += 8) {
-    // Load 8 RGB pixels, deinterleaved into separate B, G, R channels
+  for (; i <= endPx - 4; i += 4) {
+    // Load 4 RGB pixels into separate B, G, R channels
     uint8x8x3_t rgb = vld3_u8(&img_data[i * 3]);
 
-    // Widen to 16-bit to avoid overflow during multiply
-    uint16x8_t b = vmovl_u8(rgb.val[0]);
-    uint16x8_t g = vmovl_u8(rgb.val[1]);
-    uint16x8_t r = vmovl_u8(rgb.val[2]);
+    // Convert to float (only use lower 4 of the 8 loaded)
+    float32x4_t b = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[0]))));
+    float32x4_t g = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[1]))));
+    float32x4_t r = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[2]))));
 
-    // 0.114 ~ 7/64, 0.587 ~ 38/64, 0.299 ~ 19/64
-    uint16x8_t gray = vmulq_n_u16(b, 7);
-    gray = vmlaq_n_u16(gray, g, 38);
-    gray = vmlaq_n_u16(gray, r, 19);
+    // gray = 0.114*B + 0.587*G + 0.299*R
+    float32x4_t gray = vmulq_n_f32(b, 0.114f);
+    gray = vmlaq_n_f32(gray, g, 0.587f);
+    gray = vmlaq_n_f32(gray, r, 0.299f);
 
-    // Divide by 64
-    gray = vshrq_n_u16(gray, 6);
-
-    // Narrow back to 8-bit and store
-    vst1_u8(&gray_data[i], vmovn_u16(gray));
+    // Convert back to uint8 and store
+    uint16x4_t gray_u16 = vmovn_u32(vcvtq_u32_f32(gray));
+    uint8x8_t result = vmovn_u16(vcombine_u16(gray_u16, gray_u16));
+    vst1_lane_u32((uint32_t*)&gray_data[i], vreinterpret_u32_u8(result), 0);
   }
 
   // Handle remaining pixels
   for (; i < endPx; i++) {
     int index = i * 3;
-    gray_data[i] = (7 * img_data[index] + 38 * img_data[index + 1] + 19 * img_data[index + 2]) >> 6;
+    gray_data[i] = (unsigned char)(0.114f * img_data[index] + 0.587f * img_data[index + 1] + 0.299f * img_data[index + 2]);
   }
 }
 
