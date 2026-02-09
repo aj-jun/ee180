@@ -9,16 +9,22 @@ using namespace cv;
  * Output: None directly. Modifies a ref parameter img_gray_out
  * Desc: This module converts the image to grayscale
  ********************************************/
-void grayScale(Mat& img, Mat& img_gray_out)
+void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
 {
   unsigned char *img_data = img.data;
   unsigned char *gray_data = img_gray_out.data;
 
-  int tot_pixels = IMG_HEIGHT * IMG_WIDTH;
+  // If both 0, process the whole image
+  if (startRow == 0 && endRow == 0) {
+    endRow = IMG_HEIGHT;
+  }
+
+  int startPx = startRow * IMG_WIDTH;
+  int endPx = endRow * IMG_WIDTH;
 
   // Process 8 pixels at a time using NEON
-  int i = 0;
-  for (; i <= tot_pixels - 8; i += 8) {
+  int i = startPx;
+  for (; i <= endPx - 8; i += 8) {
     // Load 8 RGB pixels, deinterleaved into separate B, G, R channels
     uint8x8x3_t rgb = vld3_u8(&img_data[i * 3]);
 
@@ -40,7 +46,7 @@ void grayScale(Mat& img, Mat& img_gray_out)
   }
 
   // Handle remaining pixels
-  for (; i < tot_pixels; i++) {
+  for (; i < endPx; i++) {
     int index = i * 3;
     gray_data[i] = (7 * img_data[index] + 38 * img_data[index + 1] + 19 * img_data[index + 2]) >> 6;
   }
@@ -55,12 +61,18 @@ void grayScale(Mat& img, Mat& img_gray_out)
  *  direction, calculates the gradient in the y direction and sum it with Gx
  *  to finish the Sobel calculation
  ********************************************/
-void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
+void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow)
 {
   unsigned char *gray = img_gray.data;
   unsigned char *sobel = img_sobel_out.data;
 
-  for (int i = 1; i < IMG_HEIGHT - 1; i++) {
+  // If both 0, process the whole image
+  if (startRow == 0 && endRow == 0) {
+    startRow = 1;
+    endRow = IMG_HEIGHT - 1;
+  }
+
+  for (int i = startRow; i < endRow; i++) {
     int j;
 
     // Process 8 pixels at a time using NEON

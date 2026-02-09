@@ -74,7 +74,7 @@ void runSobelST()
     sobel_ic = perf_counters.ic.count;
 
     pc_start(&perf_counters);
-    grayScale(src, img_gray);
+    grayScale(src, img_gray, 0,0);
     pc_stop(&perf_counters);
 
     gray_time = perf_counters.cycles.count;
