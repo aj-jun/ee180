@@ -50,8 +50,6 @@ void grayScale(Mat& img, Mat& img_gray_out)
  ********************************************/
 void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 {
-    unsigned char *gray = img_gray.data;
-  unsigned char *sobel = img_sobel_out.data;
 
   // Gy and Gx together
   for (int i = 1; i < IMG_HEIGHT - 1; i++) {
@@ -60,23 +58,23 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
       int idx_mid = IMG_WIDTH * i + j;
       int idx_bot = IMG_WIDTH * (i+1) + j;
 
-      // ✅ OPTIMIZATION 4: Load 3x3 neighborhood once
-      int p00 = gray[idx_top - 1];
-      int p01 = gray[idx_top];
-      int p02 = gray[idx_top + 1];
-      int p10 = gray[idx_mid - 1];
-      int p12 = gray[idx_mid + 1];
-      int p20 = gray[idx_bot - 1];
-      int p21 = gray[idx_bot];
-      int p22 = gray[idx_bot + 1];
+      // calcluate each of the 9 combinations from the pre-made 3 indices
+      int p00 = img_gray.data[idx_top - 1];
+      int p01 = img_gray.data[idx_top];
+      int p02 = img_gray.data[idx_top + 1];
+      int p10 = img_gray.data[idx_mid - 1];
+      int p12 = img_gray.data[idx_mid + 1];
+      int p20 = img_gray.data[idx_bot - 1];
+      int p21 = img_gray.data[idx_bot];
+      int p22 = img_gray.data[idx_bot + 1];
 
-      // ✅ OPTIMIZATION 5: Compute Gx and Gy in same iteration
+      // calculate gx and gy
       int gx = (p02 + (p12 << 1) + p22) - (p00 + (p10 << 1) + p20);
       int gy = (p20 + (p21 << 1) + p22) - (p00 + (p01 << 1) + p02);
 
-      // ✅ OPTIMIZATION 6: Combined magnitude + clamp
-      int mag = abs(gx) + abs(gy);
-      sobel[idx_mid] = (mag > 255) ? 255 : mag;
+      // combine the magnitutudes and check that it is < 255
+      int magnitude = abs(gx) + abs(gy);
+      img_sobel_out.data[idx_mid] = (mag > 255) ? 255 : magnitude;
     }
   }
 }
