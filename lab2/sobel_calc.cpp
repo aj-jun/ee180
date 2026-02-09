@@ -22,26 +22,36 @@ void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
   int startPx = startRow * IMG_WIDTH;
   int endPx = endRow * IMG_WIDTH;
 
-  // Process 4 pixels at a time using neon float intrinsics
+  // Process 8 pixels at a time using neon float intrinsics
   int i = startPx;
-  for (; i <= endPx - 4; i += 4) {
-    // Load 4 RGB pixels into separate B, G, R channels
+  for (; i <= endPx - 8; i += 8) {
+    // Load 8 RGB pixels into separate B, G, R channels
     uint8x8x3_t rgb = vld3_u8(&img_data[i * 3]);
 
-    // Convert to float (only use lower 4 of the 8 loaded)
-    float32x4_t b = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[0]))));
-    float32x4_t g = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[1]))));
-    float32x4_t r = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[2]))));
+    // Convert lower 4 pixels to float
+    float32x4_t b_lo = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[0]))));
+    float32x4_t g_lo = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[1]))));
+    float32x4_t r_lo = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[2]))));
+
+    // Convert upper 4 pixels to float
+    float32x4_t b_hi = vcvtq_f32_u32(vmovl_u16(vget_high_u16(vmovl_u8(rgb.val[0]))));
+    float32x4_t g_hi = vcvtq_f32_u32(vmovl_u16(vget_high_u16(vmovl_u8(rgb.val[1]))));
+    float32x4_t r_hi = vcvtq_f32_u32(vmovl_u16(vget_high_u16(vmovl_u8(rgb.val[2]))));
 
     // gray = 0.114*B + 0.587*G + 0.299*R
-    float32x4_t gray = vmulq_n_f32(b, 0.114f);
-    gray = vmlaq_n_f32(gray, g, 0.587f);
-    gray = vmlaq_n_f32(gray, r, 0.299f);
+    float32x4_t gray_lo = vmulq_n_f32(b_lo, 0.114f);
+    gray_lo = vmlaq_n_f32(gray_lo, g_lo, 0.587f);
+    gray_lo = vmlaq_n_f32(gray_lo, r_lo, 0.299f);
+
+    float32x4_t gray_hi = vmulq_n_f32(b_hi, 0.114f);
+    gray_hi = vmlaq_n_f32(gray_hi, g_hi, 0.587f);
+    gray_hi = vmlaq_n_f32(gray_hi, r_hi, 0.299f);
 
     // Convert back to uint8 and store
-    uint16x4_t gray_u16 = vmovn_u32(vcvtq_u32_f32(gray));
-    uint8x8_t result = vmovn_u16(vcombine_u16(gray_u16, gray_u16));
-    vst1_lane_u32((uint32_t*)&gray_data[i], vreinterpret_u32_u8(result), 0);
+    uint16x4_t lo_u16 = vmovn_u32(vcvtq_u32_f32(gray_lo));
+    uint16x4_t hi_u16 = vmovn_u32(vcvtq_u32_f32(gray_hi));
+    uint8x8_t result = vmovn_u16(vcombine_u16(lo_u16, hi_u16));
+    vst1_u8(&gray_data[i], result);
   }
 
   // Handle remaining pixels
