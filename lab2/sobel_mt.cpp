@@ -18,15 +18,15 @@ using namespace cv;
 
 static ofstream results_file;
 
-// Shared data between threads
+/// Define image mats to pass between function calls
 static Mat src;
 static Mat img_gray, img_sobel;
 static float total_fps, total_ipc, total_epf;
 static float gray_total, sobel_total, cap_total, disp_total;
 static float sobel_ic_total, sobel_l1cm_total;
 
-// Flag to signal both threads to exit
-static volatile int mt_done = 0;
+// signal for when both threads are done
+static volatile int is_mt_done = 0;
 
 /*******************************************
  * Model: runSobelMT
