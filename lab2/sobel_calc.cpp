@@ -22,42 +22,33 @@ void grayScale(Mat& img, Mat& img_gray_out, int startRow, int endRow)
   int startPx = startRow * IMG_WIDTH;
   int endPx = endRow * IMG_WIDTH;
 
-  // Process 8 pixels at a time using neon float intrinsics
+  // Process 8 pixels at a time using neon intrinsics
   int i = startPx;
   for (; i <= endPx - 8; i += 8) {
     // Load 8 RGB pixels into separate B, G, R channels
     uint8x8x3_t rgb = vld3_u8(&img_data[i * 3]);
 
-    // Convert lower 4 pixels to float
-    float32x4_t b_lo = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[0]))));
-    float32x4_t g_lo = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[1]))));
-    float32x4_t r_lo = vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(rgb.val[2]))));
+    // Widen to 16-bit to avoid overflow
+    uint16x8_t b = vmovl_u8(rgb.val[0]);
+    uint16x8_t g = vmovl_u8(rgb.val[1]);
+    uint16x8_t r = vmovl_u8(rgb.val[2]);
 
-    // Convert upper 4 pixels to float
-    float32x4_t b_hi = vcvtq_f32_u32(vmovl_u16(vget_high_u16(vmovl_u8(rgb.val[0]))));
-    float32x4_t g_hi = vcvtq_f32_u32(vmovl_u16(vget_high_u16(vmovl_u8(rgb.val[1]))));
-    float32x4_t r_hi = vcvtq_f32_u32(vmovl_u16(vget_high_u16(vmovl_u8(rgb.val[2]))));
+    // 0.114 ~ 7/64, 0.587 ~ 38/64, 0.299 ~ 19/64
+    uint16x8_t gray = vmulq_n_u16(b, 7);
+    gray = vmlaq_n_u16(gray, g, 38);
+    gray = vmlaq_n_u16(gray, r, 19);
 
-    // gray = 0.114*B + 0.587*G + 0.299*R
-    float32x4_t gray_lo = vmulq_n_f32(b_lo, 0.114f);
-    gray_lo = vmlaq_n_f32(gray_lo, g_lo, 0.587f);
-    gray_lo = vmlaq_n_f32(gray_lo, r_lo, 0.299f);
+    // Divide by 64
+    gray = vshrq_n_u16(gray, 6);
 
-    float32x4_t gray_hi = vmulq_n_f32(b_hi, 0.114f);
-    gray_hi = vmlaq_n_f32(gray_hi, g_hi, 0.587f);
-    gray_hi = vmlaq_n_f32(gray_hi, r_hi, 0.299f);
-
-    // Convert back to uint8 and store
-    uint16x4_t lo_u16 = vmovn_u32(vcvtq_u32_f32(gray_lo));
-    uint16x4_t hi_u16 = vmovn_u32(vcvtq_u32_f32(gray_hi));
-    uint8x8_t result = vmovn_u16(vcombine_u16(lo_u16, hi_u16));
-    vst1_u8(&gray_data[i], result);
+    // Narrow back to 8-bit and store
+    vst1_u8(&gray_data[i], vmovn_u16(gray));
   }
 
-  // Handle remaining pixels
+  // individually handling pixels in case the total number of pixels don't split into 8 
   for (; i < endPx; i++) {
     int index = i * 3;
-    gray_data[i] = (unsigned char)(0.114f * img_data[index] + 0.587f * img_data[index + 1] + 0.299f * img_data[index + 2]);
+    gray_data[i] = (7 * img_data[index] + 38 * img_data[index + 1] + 19 * img_data[index + 2]) >> 6;
   }
 }
 
@@ -84,9 +75,9 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow)
   for (int i = startRow; i < endRow; i++) {
     int j;
 
-    // Process 8 pixels at a time using NEON
+    // Process 8 pixels at a time using neon intrinsics
     for (j = 1; j <= IMG_WIDTH - 9; j += 8) {
-      // Load 8 pixels from each of the 9 neighbor positions
+      // Load 8 pixels from each of the 9 positions since we don't need the middle
       uint8x8_t top_l = vld1_u8(&gray[IMG_WIDTH*(i-1) + j - 1]);
       uint8x8_t top_m = vld1_u8(&gray[IMG_WIDTH*(i-1) + j]);
       uint8x8_t top_r = vld1_u8(&gray[IMG_WIDTH*(i-1) + j + 1]);
@@ -119,14 +110,14 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out, int startRow, int endRow)
       // |gx| + |gy|
       int16x8_t mag = vaddq_s16(vabsq_s16(gx), vabsq_s16(gy));
 
-      // Saturating narrow to uint8 — clamps to [0, 255]
+      // bring 16 bits back to 8 bits and make sure the values are capped at 255
       uint8x8_t result = vqmovun_s16(mag);
 
       // Store 8 results
       vst1_u8(&sobel[IMG_WIDTH*i + j], result);
     }
 
-    // Handle remaining pixels with scalar code
+    // individually handling pixels in case the total number of pixels don't split into 8 
     for (; j < IMG_WIDTH - 1; j++) {
       int idx_top = IMG_WIDTH * (i-1) + j;
       int idx_mid = IMG_WIDTH * i + j;
