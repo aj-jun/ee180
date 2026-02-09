@@ -39,7 +39,7 @@ static volatile int is_mt_done = 0;
 void *runSobelMT(void *ptr)
 {
   string top = "Sobel Top";
-  uint64_t cap_time, gray_time, sobel_time, disp_time, sobel_l1cm, sobel_ic;
+  uint64_t cap_time = 0, gray_time = 0, sobel_time = 0, disp_time = 0, sobel_l1cm = 0, sobel_ic = 0;
   pthread_t myID = pthread_self();
   counters_t perf_counters;
 
