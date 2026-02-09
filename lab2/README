@@ -16,9 +16,45 @@ Vincent:
 - A brief description of optimizations you tried, the outcome, and some explanation (why it worked / why it did not)
 
 - Report the final performance for both single thread and multithread (we will verify this with your code submission)
-Single Thread:
+Single Thread: 
+Percent of time per function
+Capture, 40.5902%
+Grayscale, 19.5096%
+Sobel, 19.4266%
+Display, 20.4736%
+
+Summary
+Frames per second, 78.2105
+Cycles per frame, 1.15113e+07
+Energy per frames (mJ), 17.9004
+Total frames, 50
+
+Hardware Stats (Cap + Gray + Sobel + Display)
+Instructions per cycle, 0.722894
+L1 misses per frame, 126841
+L1 misses per instruction, 0.0153789
+Instruction count per frame, 8.24776e+06
+
 
 Multithread:
+Percent of time per function
+Capture, 50.0706%
+Grayscale, 12.3065%
+Sobel, 12.2293%
+Display, 25.3936%
+
+Summary
+Frames per second, 98.2602
+Cycles per frame, 9.28349e+06
+Energy per frames (mJ), 28.4958
+Total frames, 50
+
+Hardware Stats (Cap + Gray + Sobel + Display)
+Instructions per cycle, 0.775526
+L1 misses per frame, 95234.5
+L1 misses per instruction, 0.0134256
+Instruction count per frame, 7.09349e+06
+
 
 
 - If you used AI tools, explain how you use it to help with the assignment
