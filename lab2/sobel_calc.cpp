@@ -10,16 +10,32 @@ using namespace cv;
  ********************************************/
 void grayScale(Mat& img, Mat& img_gray_out)
 {
-  double color;
+  // double color;
 
-  // Convert to grayscale
-  for (int i=0; i<img.rows; i++) {
-    for (int j=0; j<img.cols; j++) {
-      color = .114*img.data[STEP0*i + STEP1*j] +
-              .587*img.data[STEP0*i + STEP1*j + 1] +
-              .299*img.data[STEP0*i + STEP1*j + 2];
-      img_gray_out.data[IMG_WIDTH*i + j] = color;
-    }
+  // // Convert to grayscale
+  // for (int i=0; i<img.rows; i++) {
+  //   for (int j=0; j<img.cols; j++) {
+  //     color = .114*img.data[STEP0*i + STEP1*j] +
+  //             .587*img.data[STEP0*i + STEP1*j + 1] +
+  //             .299*img.data[STEP0*i + STEP1*j + 2];
+  //     img_gray_out.data[IMG_WIDTH*i + j] = color;
+  //   }
+  // }
+  int tot_pixels = IMG_HEIGHT * IMG_WIDTH;
+  // where we want to put it in img_gray_out.data
+
+  for (int i=0; i < tot_pixels; i++) {
+    // 3 bytes per pixel
+    int index = i * 3;
+
+    // pixels : blue, green, red
+    unsigned char blue = .114*img.data[index];
+    unsigned char green = .587*img.data[index + 1];
+    unsigned char red = .299*img.data[index + 2];
+    // final placement
+    img_gray_out.data[i] = (blue + green + red);
+
+
   }
 }
 
