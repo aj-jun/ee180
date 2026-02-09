@@ -121,4 +121,3 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
   //     img_sobel_out.data[IMG_WIDTH*(i) + j] = sobel;
   //   }
   // }
-}
