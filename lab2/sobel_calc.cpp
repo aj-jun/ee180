@@ -10,6 +10,8 @@ using namespace cv;
  ********************************************/
 void grayScale(Mat& img, Mat& img_gray_out)
 {
+  unsigned char *img_data = img.data;
+  unsigned char *gray_data = img_gray_out.data;
   // double color;
 
   // // Convert to grayscale
@@ -29,13 +31,14 @@ void grayScale(Mat& img, Mat& img_gray_out)
     int index = i * 3;
 
     // pixels : blue, green, red
-    unsigned char blue = .114*img.data[index];
-    unsigned char green = .587*img.data[index + 1];
-    unsigned char red = .299*img.data[index + 2];
+    unsigned char blue = .114*img_data[index];
+    unsigned char green = .587*img_data[index + 1];
+    unsigned char red = .299*img_data[index + 2];
     // final placement
-    img_gray_out.data[i] = (blue + green + red);
+    gray_data[i] = (blue + green + red);
 
 
+  
   }
 }
 
@@ -50,7 +53,8 @@ void grayScale(Mat& img, Mat& img_gray_out)
  ********************************************/
 void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 {
-
+  unsigned char *gray = img_gray.data;
+  unsigned char *sobel = img_sobel_out.data;
   // Gy and Gx together
   for (int i = 1; i < IMG_HEIGHT - 1; i++) {
     for (int j = 1; j < IMG_WIDTH - 1; j++) {
@@ -59,14 +63,14 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
       int idx_bot = IMG_WIDTH * (i+1) + j;
 
       // calcluate each of the 9 combinations from the pre-made 3 indices
-      int p00 = img_gray.data[idx_top - 1];
-      int p01 = img_gray.data[idx_top];
-      int p02 = img_gray.data[idx_top + 1];
-      int p10 = img_gray.data[idx_mid - 1];
-      int p12 = img_gray.data[idx_mid + 1];
-      int p20 = img_gray.data[idx_bot - 1];
-      int p21 = img_gray.data[idx_bot];
-      int p22 = img_gray.data[idx_bot + 1];
+      int p00 = gray[idx_top - 1];
+      int p01 = gray[idx_top];
+      int p02 = gray[idx_top + 1];
+      int p10 = gray[idx_mid - 1];
+      int p12 = gray[idx_mid + 1];
+      int p20 = gray[idx_bot - 1];
+      int p21 = gray[idx_bot];
+      int p22 = gray[idx_bot + 1];
 
       // calculate gx and gy
       int gx = (p02 + (p12 << 1) + p22) - (p00 + (p10 << 1) + p20);
@@ -74,7 +78,7 @@ void sobelCalc(Mat& img_gray, Mat& img_sobel_out)
 
       // combine the magnitutudes and check that it is < 255
       int magnitude = abs(gx) + abs(gy);
-      img_sobel_out.data[idx_mid] = (magnitude > 255) ? 255 : magnitude;
+      sobel[idx_mid] = (magnitude > 255) ? 255 : magnitude;
     }
   }
 }
