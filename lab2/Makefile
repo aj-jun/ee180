@@ -1,8 +1,16 @@
 # Set compiler args
-CC=g++
+CC=g++ # Use g++ as the C++ compiler (required for OpenCV + C++ sources)
+
+# Compiler flags:
+# -O3                : aggressive optimization (loop unrolling, inlining, vectorization)
+# -ftree-vectorize   : allow compiler auto-vectorization where possible
+# -mfpu=neon         : enable ARM NEON SIMD unit
 CFLAGS=-Wall -c -O3 -ftree-vectorize -mfpu=neon -march=armv7-a -mtune=cortex-a9
 LDFLAGS=
+
+# Linker libraries: pthread for multithreading
 LDLIBS=-L /usr/lib $$(pkg-config --cflags --libs opencv) -pthread
+
 ifeq ($(shell arch), armv7l)
 	LDLIBS += -lpfm
 endif

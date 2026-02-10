@@ -19,14 +19,16 @@ using namespace cv;
 static ofstream results_file;
 
 /// Define image mats to pass between function calls
-static Mat src;
-static Mat img_gray, img_sobel;
+// Global/shared state (shared by both threads):
+static Mat src;                 // latest captured color frame (written by thread0, read by both)
+static Mat img_gray, img_sobel; // shared intermediate + output buffers (both threads write disjoint rows)
 static float total_fps, total_ipc, total_epf;
 static float gray_total, sobel_total, cap_total, disp_total;
 static float sobel_ic_total, sobel_l1cm_total;
 
-// signal for when both threads are done
+// Termination flag set by thread0; volatile so the other thread observes updates.
 static volatile int is_mt_done = 0;
+
 
 /*******************************************
  * Model: runSobelMT
@@ -52,32 +54,34 @@ void *runSobelMT(void *ptr)
 
   bool isThread0 = (myID == thread0_id);
 
-  // Determine row ranges for work splitting
+  // Determine row ranges for work splitting between threads
+  // Preclude data races by having threads write to disjoint row ranges
   int gray_start, gray_end;
   int sobel_start, sobel_end;
 
-  if (isThread0) {
+  if (isThread0) { // the top half
     gray_start  = 0;
     gray_end    = IMG_HEIGHT / 2;
-    sobel_start = 1;
-    sobel_end   = IMG_HEIGHT / 2;
-  } else {
+    sobel_start = 1; // skip very first row (needs i-1)
+    sobel_end   = IMG_HEIGHT / 2; // stop before midpoint overlap
+  } else { // bottom half
     gray_start  = IMG_HEIGHT / 2;
     gray_end    = IMG_HEIGHT;
-    sobel_start = IMG_HEIGHT / 2;
-    sobel_end   = IMG_HEIGHT - 1;
+    sobel_start = IMG_HEIGHT / 2; // start at midpoint
+    sobel_end   = IMG_HEIGHT - 1; // skip last row (needs i+1)
   }
 
   CvCapture* video_cap = NULL;
 
-  if (isThread0) {
+  if (isThread0) { // controller thread initializes perf counters and I/O
     pc_init(&perf_counters, 0);
 
-    if (opts.webcam) {
+    if (opts.webcam) { // open either webcam or file input
       video_cap = cvCreateCameraCapture(-1);
     } else {
       video_cap = cvCreateFileCapture(opts.videoFile);
     }
+    // Force capture resolution of lab specs
     cvSetCaptureProperty(video_cap, CV_CAP_PROP_FRAME_WIDTH, IMG_WIDTH);
     cvSetCaptureProperty(video_cap, CV_CAP_PROP_FRAME_HEIGHT, IMG_HEIGHT);
 
@@ -92,9 +96,10 @@ void *runSobelMT(void *ptr)
     // ===== PHASE 1: CAPTURE (thread 0 only) =====
     if (isThread0) {
       pc_start(&perf_counters);
-      src = cvQueryFrame(video_cap);
+      src = cvQueryFrame(video_cap); // write the shared src
       pc_stop(&perf_counters);
 
+      // Save capture cycles, accumulate low level stats
       cap_time = perf_counters.cycles.count;
       sobel_l1cm = perf_counters.l1_misses.count;
       sobel_ic = perf_counters.ic.count;
@@ -104,15 +109,15 @@ void *runSobelMT(void *ptr)
     pthread_barrier_wait(&barr_capture);
 
     // run grayscale
-    if (isThread0) pc_start(&perf_counters);
+    if (isThread0) pc_start(&perf_counters); // measure only on thread0 to report
 
-    grayScale(src, img_gray, gray_start, gray_end);
+    grayScale(src, img_gray, gray_start, gray_end); // each thread writes half
 
     // barrier for completing grayscale
     pthread_barrier_wait(&barr_gray);
 
     if (isThread0) {
-      pc_stop(&perf_counters);
+      pc_stop(&perf_counters); 
       gray_time = perf_counters.cycles.count;
       sobel_l1cm += perf_counters.l1_misses.count;
       sobel_ic += perf_counters.ic.count;
