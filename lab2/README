@@ -8,7 +8,7 @@ thaiv47@stanford.edu
 Board hostname: ee180-3z.stanford.edu
 
 - Each partner's contribution to the assignment
-Ashley: Did the multi thread execution with its row partitioning across threads, barrier
+Ashley: Did the original single thread reconstruction and multi thread execution with its row partitioning across threads, barrier
 syncronization, deterministic execution. Helped debug correctness issues, validate perfomance
 counters
 
