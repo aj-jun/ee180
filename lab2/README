@@ -8,66 +8,105 @@ thaiv47@stanford.edu
 Board hostname: ee180-3z.stanford.edu
 
 - Each partner's contribution to the assignment
-Ashley:
+Ashley: Did the multi thread execution with its row partitioning across threads, barrier
+syncronization, deterministic execution. Helped debug correctness issues, validate perfomance
+counters
 
-Vincent:
-
+Vincent: Clarified the NEON vectorization in grayscale and sobelcalc for single thread,
+reading in the BGR pixels and overflow handling with widen/calc/narrow, removing 
+recalculations of row indices, and checking final performance results
 
 - A brief description of optimizations you tried, the outcome, and some explanation (why it worked / why it did not)
-All of the optimizations that we used were applied to the single thread implementation since the multi-thread implementation called upon the single thread optimization. I was honestly really confused when starting this lab even after watching the review session and clicking through the links with the descriptive information from the lab handout. I started with the compiler flags based on what was described on the linked websites for ARM and from my initial description from chatgpt, I couldn't tell if the flags made that much of a difference. I was going off of what I read would be helpful since nothing was implemented in sobel_calc.cpp. Next, I started on reconstructing the code for grayScale then sobelCalc. I found that the double layered loop for grayscale was not needed and could instead be turning into a one layer loop that segmented/included the BGR values. This changed the Framers per Second from 3 to 5 which was very little. I thought I did something wrong at first, so I asked chatgpt by this didn't make that much of an impact. It explained to me that most of the implementation would be done in sobelCalc so that while it was helpful to change grayScale it didn't make sense for it to have a large impact. Then I reconstructed sobelCalc which collapsed the three separate loop iterations into calculating the gx and gy convolutions together. It was also a great way to add the magnitudes to decide if the value was > or < 255. When reconstructing the two function calls, the instructions per frame went up to 38 but it wasn't the expected 67, so I turned to using neon instrinstics. This involved loading and processing 8 pixels at a time instead of one by one. 
+Optimizations Tried, Outcomes, and Explanation
 
-Originally, for grayScale, I used vld3_u8 to load 4 BGR pixels into separate channels since I was multiplying the blue, green, and red indices by the provided coefficient. However, this got me to 81 instructions per second which was below the needed amount. Then, I tried loading 8 BGR pixels by splitting them based on upper four and lower four. This helped bring the instructions per second to 88. However, when re-running the single thread, I had fallen below the 67 instructions per second. I then asked chatgpt if there was a difference in floats to integers in terms of speed and if there was a way to convert the float coefficients that I needed to multiply the pixels into integer equivalents. It then provided me with 7/64, 38/64, 19/64 multiplications with a right shift by 6 instead of dividing. I ran into errors and it was because I was having overflow errors so I had to widen each to 16 bits, apply the coefficients, then reduce back to 8 bits. 
+All optimizations were first applied to the single-threaded implementation, since the 
+multi-threaded version builds directly on the optimized single-thread kernel. We began 
+by modifying compiler flags based on ARM documentation and the lab handout 
+(-O3, -mfpu=neon, -march=armv7-a, -mtune=cortex-a9). While these flags enabled 
+vectorization and improved instruction scheduling, they did not significantly
+increase FPS on their own because the baseline sobel_calc.cpp did not expose 
+enough data-level parallelism for the compiler to exploit.
 
-For sobelCalc, I loaded 8 pixels from each of the 9 positions since we don't need the middle position. I used 8 since it worked for grayScale so I thought it could apply to sobelCalc. Then before doing the subtraction adn addition, I needed to widen all pixels to 16 signed bits before computing the convolutions for x and y. The issue was bringing it back to a 8 bit, which another neon intrinsic instruction helped with. I had to ask chatgpt what to do if I had pixels that didn't fall into 8 pixel iterations and how to handle those individual pixels and it recommended a scalar fallback. This was the same as we originally had for each individual pixel but I don't give it a starting j value for index since it is catching the remaining. After adding these changes, the frames per second jumped up to around 78 for single thread. 
+We then restructured the grayscale conversion. An early attempt collapsed the original 
+nested loops into a single loop that directly segmented BGR values, which increased FPS
+only marginally (approximately 3 to 5 FPS). This indicated that grayscale was not the 
+primary bottleneck. We next introduced NEON intrinsics, initially loading 4 pixels at a
+time using vld3_u8. This improved instruction throughput but still fell short of the 
+target performance. Expanding the vector width to 8 pixels improved throughput further, 
+but floating-point arithmetic limited gains. To address this, we converted grayscale 
+computation to fixed-point integer arithmetic using scaled coefficients 
+(7/64, 38/64, 19/64) with a right shift. This required widening pixel values to 16 bits 
+to avoid overflow and narrowing back to 8 bits. This change significantly reduced 
+instruction count while preserving correctness.
 
-Additionally, in order to allow for neon intrinsics, we had to add  #include <arm_neon.h>to the sobel_calc.cpp. 
+The largest performance improvement came from optimizing sobelCalc. We vectorized the 
+Sobel filter by processing eight pixels at a time and computing both X and Y gradients 
+using signed 16-bit arithmetic. Early versions attempted to combine gradients before 
+saturation, which produced visually incorrect, grainy output and revealed the importance 
+of preserving the reference implementation’s intermediate clamping semantics. The final 
+implementation computes gx and gy separately, takes absolute values, sums them, and 
+applies saturating narrowing to match the reference behavior. A scalar fallback path 
+handles remaining pixels that do not align with the vector width. With these changes, 
+single-thread performance reached approximately 78 FPS. The same optimized kernel was 
+then parallelized across two cores using row partitioning and pthread barriers, yielding 
+near-linear scaling.
 
-When handling the multi-thread case, the sobel_calc.cpp file was changed again to allow for the start_row and end_row to be included. This didn't dramatically impact the optimizations other than having a combined method for both single and multi thread. 
+Final Performance Results
 
+Single Thread:
 
-- Report the final performance for both single thread and multithread (we will verify this with your code submission)
-Single Thread: 
 Percent of time per function
-Capture, 40.5902%
-Grayscale, 19.5096%
-Sobel, 19.4266%
-Display, 20.4736%
+Capture, 40.4224%
+Grayscale, 19.8305%
+Sobel, 19.2391%
+Display, 20.5079%
 
 Summary
-Frames per second, 78.2105
-Cycles per frame, 1.15113e+07
-Energy per frames (mJ), 17.9004
+Frames per second, 78.1091
+Cycles per frame, 1.15256e+07
+Energy per frames (mJ), 17.9236
 Total frames, 50
 
 Hardware Stats (Cap + Gray + Sobel + Display)
-Instructions per cycle, 0.722894
-L1 misses per frame, 126841
-L1 misses per instruction, 0.0153789
-Instruction count per frame, 8.24776e+06
-
+Instructions per cycle, 0.732002
+L1 misses per frame, 126819
+L1 misses per instruction, 0.0151693
+Instruction count per frame, 8.36026e+06
 
 Multithread:
+
 Percent of time per function
-Capture, 50.0706%
-Grayscale, 12.3065%
-Sobel, 12.2293%
-Display, 25.3936%
+Capture, 50.2018%
+Grayscale, 12.6453%
+Sobel, 11.9744%
+Display, 25.1785%
 
 Summary
-Frames per second, 98.2602
-Cycles per frame, 9.28349e+06
-Energy per frames (mJ), 28.4958
+Frames per second, 96.9277
+Cycles per frame, 9.40407e+06
+Energy per frames (mJ), 28.8875
 Total frames, 50
 
 Hardware Stats (Cap + Gray + Sobel + Display)
-Instructions per cycle, 0.775526
-L1 misses per frame, 95234.5
-L1 misses per instruction, 0.0134256
-Instruction count per frame, 7.09349e+06
-
+Instructions per cycle, 0.76885
+L1 misses per frame, 95895.5
+L1 misses per instruction, 0.0134544
+Instruction count per frame, 7.12746e+06
 
 
 - If you used AI tools, explain how you use it to help with the assignment
 Ashley: 
-Overall, I was confused by what the three different methods of optimization meant based on what was provided in the review slide deck. I copied and pasted the three methods of optimization and had chatgpt explain what each meant in a different way and how they were different from one another. 
-I used AI to help provide defintions when explaining the different compiler flags. This was particularly helpful when understadnignt aht we can specify which architecture and processor to optimize for in the flags. 
+Overall, I was confused by what the three different methods of optimization meant 
+based on what was provided in the review slide deck. I copied and pasted the three 
+methods of optimization and had chatgpt explain what each meant in a different way 
+and how they were different from one another. 
+
+I used AI to help provide defintions when explaining the different compiler flags. 
+This was particularly helpful when understadnignt aht we can specify which architecture 
+and processor to optimize for in the flags. 
+
+Vincent:
+Chat helped me understand the syntax/meaning of the NEON commands as I used them,
+and also conceptually more about what they were doing. I also asked chat to help summarize/
+inventory what kind of optimizations we did, though I am writing this myself. I also had
+chat explain the makefile and conceptually what a sobel filter was
